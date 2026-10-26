@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Zames - a machine-made sky</title>
+<style>
+ html, body { margin: 0; height: 100%; background: #04060d; color: #cfe6ff;
+ font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; overflow: hidden; }
+ #c { display: block; width: 100vw; height: 100vh; }
+ #hud { position: fixed; left: 18px; bottom: 16px; font-size: 12.5px; line-height: 1.65;
+ letter-spacing: .02em; color: #8fb6d8; pointer-events: none; }
+ #hud b { color: #dff1ff; font-weight: 600; }
+ #hud .river { color: #5ec8f2; }
+ #hud .isle { color: #f2b45e; }
+ #title { position: fixed; left: 18px; top: 16px; pointer-events: none; }
+ #title h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: .22em; color: #dff1ff; }
+ #title p { margin: 4px 0 0; font-size: 11.5px; color: #6d8ba6; letter-spacing: .06em; }
+ #keys { position: fixed; right: 18px; bottom: 16px; font-size: 11.5px; text-align: right;
+ color: #6d8ba6; line-height: 1.8; pointer-events: none; }
+ #keys kbd { color: #cfe6ff; border: 1px solid #25374a; border-radius: 3px;
+ padding: 0 4px; font-family: inherit; font-size: 11px; }
+ #loading { position: fixed; inset: 0; display: grid; place-items: center; font-size: 12px;
+ letter-spacing: .3em; color: #4d6478; transition: opacity .6s; }
+</style>
+</head>
+<body>
+<!-- Search Bar -->
+<div id="search-container">
+  <input type="text" id="search" list="star-list" placeholder="ค้นหาชื่อดาว... (เช่น Sirius)" autocomplete="off">
+  <datalist id="star-list"></datalist>
+</div>
+
+<style>
+  #search-container {
+    position: fixed; top: 20px; right: 20px; z-index: 10;
+  }
+  #search {
+    padding: 10px 16px; border-radius: 20px;
+    background: rgba(10, 20, 30, 0.7); border: 1px solid #5ec8f2;
+    color: #fff; font: 14px ui-monospace, monospace;
+    outline: none; width: 250px; backdrop-filter: blur(4px);
+    transition: border-color 0.2s;
+  }
+  #search:focus { border-color: #fff; box-shadow: 0 0 10px rgba(94, 200, 242, 0.5); }
+</style>
+<canvas id="c"></canvas>
+<div id="title">
+ <h1>ZAMES</h1>
+ <p>a machine-devised constellation system</p>
+</div>
+<div id="hud"></div>
+<div id="keys">
+ <div><kbd>1</kbd> lines  <kbd>2</kbd> sky  <kbd>3</kbd> names</div>
+ <div><kbd>4</kbd> IAU 88  <kbd>R</kbd> reset view</div>
+ <div>drag to orbit - scroll to zoom</div>
+</div>
+<div id="loading">LOADING</div>
+<script type="importmap">
+{ "imports": {
+ "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+ "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

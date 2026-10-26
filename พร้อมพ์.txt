@@ -1,0 +1,236 @@
+text
+═══════════════════════════════════════════════════════════════════
+PROJECT: ZAMES
+A machine-generated constellation system on the celestial sphere
+═══════════════════════════════════════════════════════════════════
+
+## 1. VISION
+
+Zames คือระบบ "กลุ่มดาวใหม่" ที่สร้างด้วย machine learning บนทรงกลมฟ้า
+โดย "ไม่ใช้" กลุ่มดาว IAU 88 กลุ่ม ไม่ใช้ราศี ไม่ใช้เส้นทางสุริยะ (ecliptic)
+เป็นกรอบอ้างอิงใด ๆ ทั้งสิ้น ตั้งแต่บรรทัดแรกของ pipeline
+
+metaphor หลัก: ทางช้างเผือกคือ "แม่น้ำ" — กลุ่มดาวคือ "เมืองริมน้ำ"
+(chain) หรือ "เกาะ" (compact blob) ขึ้นกับระยะห่างจากระนาบกาแล็กซี
+
+ชื่อ "Zames" มาจาก Hebrew "זָמַם" (zamam) = "to plan, devise, plot"
+— สื่อถึงระบบที่ "วางแผน" การจัดกลุ่มดาวขึ้นมาใหม่
+
+## 2. NON-NEGOTIABLE CONSTRAINTS
+
+- ❌ ห้ามใช้กลุ่มดาว IAU 88 กลุ่มเป็น input, seed, target, หรือ validation
+      ใน stage การสร้าง (ใช้ได้เฉพาะ benchmarking ภายหลัง)
+- ❌ ห้ามใช้ ecliptic / zodiac / เส้นทางสุริยะ เป็นกรอบอ้างอิงหลัก
+- ✅ ใช้ Galactic coordinates (l, b) เป็นกรอบหลัก
+- ✅ ใช้เฉพาะดาวฤกษ์ที่มองเห็นด้วยตาเปล่าในเมือง (mag ≲ 3.0)
+- ✅ ทางช้างเผือกต้องเป็น "constraint" ที่ส่งผลต่อ clustering
+      ไม่ใช่แค่ texture ประกอบ
+- ✅ ผลลัพธ์ต้อง reproducible (seed ได้, deterministic ต่อ seed)
+
+## 3. DATA SPEC
+
+### 3.1 Stars
+- Source: HYG Database v4.1 (astronexus/HYG-Database) หรือ Gaia DR3
+- Filter: mag ≤ 3.0 (ได้ ~170 ดวง)
+- Columns ที่ต้องใช้: proper name, RA (hours), Dec (deg), mag, ci (B−V)
+- Output: stars.json พร้อม l, b ที่คำนวณแล้วใน Galactic frame
+- Note: ถ้าใช้ Gaia ต้อง map source_id → name จาก SIMBAD
+
+### 3.2 Milky Way
+- Source แนะนำ: Gaia DR3 star density (equirectangular PNG)
+  หรือ ESO Milky Way panorama (Serge Brunier)
+- Format: equirectangular projection ใน Galactic coordinates
+  (horizontal = l, vertical = b, l=0 อยู่กลางภาพ)
+- ใช้ทั้งเป็น (a) texture บนเปลือกทรงกลม
+           (b) density prior ที่ป้อนให้ clustering
+
+## 4. PIPELINE (7 stages)
+
+### Stage 1 — Preprocessing
+- โหลดดาว → แปลง RA/Dec J2000 → unit vectors บน S²
+- คำนวณ Galactic (l, b) ผ่าน rotation matrix จาก NGP + GC
+- Normalize ชื่อ, dedupe multiple systems ( garde A component เท่านั้น)
+
+### Stage 2 — Graph Construction
+- Spherical k-NN graph (k = 6, tune ได้)
+- Edge weight: w = exp(−θ/σ) โดย θ = angular distance, σ = 0.3 rad
+- เหตุผล: k=6 ให้ connectivity ที่ดีโดยไม่ over-constrain
+
+### Stage 3 — Initial Partition
+- Leiden algorithm (ดีกว่า Louvain เล็กน้อย แต่ใช้ Louvain ก็ได้)
+- Expected output: ~25–35 clusters จาก 170 ดาว
+- Purpose: เป็น seed ให้ stage 4 (ไม่ใช่ผลลัพธ์สุดท้าย)
+
+### Stage 4 — Constrained Optimization (Simulated Annealing)
+- State: assignment ของดาวแต่ละดวง → cluster id
+- Move: ย้ายดาว 1 ดวงไป cluster ของเพื่อนบ้านใน graph
+- Objective (multi-term):
+    score = −w_c · compactness
+            − w_l · linearity_penalty
+            − w_s · size_penalty
+            + w_m · MW_chain_reward
+  โดย:
+    compactness      = ผลรวมระยะเชิงมุมระหว่างดาวทุกคู่ใน cluster
+    linearity        = |λ₁/(λ₁+λ₂) − target|
+                       target = 0.82 ถ้า |b_centroid| < 20°
+                              = 0.58 ถ้าอยู่นอกแถบ MW
+    size_penalty     = |n − target_size|
+                       target_size = 7 (in MW) / 5 (out)
+    MW_chain_reward  = ถ้า cluster อยู่ในแถบ MW: reward ถ้า
+                       ดาวเรียงต่อกันเป็น chain ตาม l
+
+- Annealing schedule: T₀=0.8, T₁=0.001, 15k–50k iterations
+- ควรรัน 3–5 restart เลือก best score (parallel tempering ถ้าทำได้)
+
+### Stage 5 — Line Generation
+- ต่อ cluster แต่ละกลุ่ม: สร้าง MST (Prim) บน complete graph ภายใน cluster
+- De-crossing: project ลง tangent plane ที่ centroid → ตรวจ segment
+  intersection ใน 2D → ทิ้ง edge ที่ตัดกัน (เก็บ edge สั้นก่อน)
+- Prune: ตัด edge ที่ยาว > 1.5× median ของ cluster
+- (Optional) GNN rescore สำหรับ "human-like style" — ดูข้อ 7
+
+### Stage 6 — Naming
+- Rule-based (ห้ามใช้ LLM เป็น primary):
+  - ถ้า in MW: "River-{NN}" โดย NN = running index ตาม Galactic longitude
+  - ถ้า out MW: "Isle-{NN}"
+- (Optional secondary): LLM generate ชื่อเชิงกวีจากรูปทรงของ cluster
+  — เก็บเป็น "alias" ไม่ใช่ primary name
+
+### Stage 7 — Export
+- zames.json structure:
+  {
+    "generatedAt": ISO8601,
+    "system": "zames-vX.Y",
+    "seed": <int>,
+    "stars": [{id, name, ra, dec, l, b, mag}],
+    "constellations": [{
+      id, style ("river"|"isle"),
+      centroid: {l, b},
+      starIds: [...],
+      edges: [[u, v], ...]
+    }]
+  }
+- ขนาดต้อง < 200 KB (ไม่บีบอัด) เพื่อ serve ฝั่ง client
+
+## 5. VISUALIZATION SPEC
+
+- Stack: Three.js (r160+), import map จาก unpkg
+- Scene:
+  - Unit sphere, BackSide, radius = 1
+  - Milky Way texture mapped equirectangular
+  - Stars: Points shader, size ∝ 6.5 − mag·1.35, color = B−V
+  - Constellation lines: LineSegments, แยกสีตาม style
+    (river = cyan #5ec8f2, isle = amber #f2b45e)
+  - Labels: CanvasTexture sprites ที่ centroid
+- Camera: OrbitControls, อยู่ที่ (0, 0.9, 2.6)
+- Orientation: หมุน group ให้ระนาบ Galactic นอนราบ (rotation.x = −π/2)
+- Toggles (keyboard):
+  - [1] lines on/off
+  - [2] sky texture on/off
+  - [3] labels on/off
+  - [4] (proposed) side-by-side กับ IAU 88 สำหรับ benchmarking
+- HUD: แสดง star count, constellation count, rivers/isles split
+- Performance target: 60 fps @ 1080p บน M1 / integrated GPU
+
+## 6. DELIVERABLES
+
+Priority order:
+1. ml/build.js — full pipeline ที่รันเป็น CLI ได้ 1 คำสั่ง
+2. data/stars.json — mag ≤ 3 subset พร้อม l, b
+3. public/zames.json — output จาก build.js
+4. public/index.html + public/main.js — Three.js viewer
+5. README.md — วิธีรัน + อธิบาย design decisions
+6. (optional) notebooks/ — Jupyter notebook สำหรับ tune hyperparameters
+
+## 7. OPEN QUESTIONS (สำหรับ architect ตัดสินใจ)
+
+Q1. Leiden vs Louvain: Leiden ดีกว่าจริงในกรณีนี้หรือเปล่า?
+    (170 nodes น้อยมาก — overhead อาจไม่คุ้ม)
+
+Q2. GNN rescore (stage 5 optional) — worth doing?
+    ข้อดี: ได้ "human style" lines
+    ข้อเสีย: training set มีแค่ 88 ตัวอย่าง → overfit ง่าย
+    ทางเลือก: ใช้ hand-crafted geometric rules แทน (แนะนำ)
+
+Q3. Milky Way density prior จะ integrate เข้า stage 4 ยังไงดี?
+    Option A: weight edges ใน graph ตาม density (ง่าย)
+    Option B: reward ใน objective ตาม density (กลาง)
+    Option C: pre-cluster ดาวในแถบ MW แยก แล้ว optimize คนละแบบ (ซับซ้อน)
+
+Q4. จะให้ผู้ใช้ "seed" ได้ไหม?
+    ถ้าใช่ → ต้อง tune จน seed ต่างกันให้ผล "น่าสนใจ" ทุก seed
+    ถ้าไม่ → fix seed เดียว แต่ reproducibility ยังต้องมี
+
+Q5. Bench-marking กับ IAU 88: วัดอะไร?
+    - silhouette score ของ clusters (แต่ไม่ fair เพราะ IAU ไม่ได้ optimize metric)
+    - human survey ("new map ดูสวยกว่า/น่าสนใจกว่าเดิมไหม")
+    - coverage: ดาวทุกดวงถูกใช้หรือเปล่า, cluster size distribution
+
+Q6. Deployment: static site (Vercel/Netlify) หรือ local-only?
+    ถ้า static → build.js ต้องรัน offline ก่อน deploy (แนะนำ)
+    ถ้า dynamic → ต้องมี backend รัน ML (overkill สำหรับ 170 ดาว)
+
+## 8. SUCCESS CRITERIA
+
+ขั้นต่ำ (MVP):
+- [ ] build.js รันจบใน < 5 วินาที
+- [ ] ได้ 20–40 constellations, ไม่มี singleton
+- [ ] ไม่มี edge ตัดกัน (verified ใน tangent plane)
+- [ ] ทุกดาว mag ≤ 3 ถูกใช้อย่างน้อย 1 ครั้ง
+- [ ] viewer โหลด zames.json แล้วแสดงผลได้ใน < 2 วินาที
+
+ขั้นดี:
+- [ ] Milky Way texture จริง (Gaia density)
+- [ ] River/Isle split สมเหตุสมผล (river อยู่ในแถบ MW จริง)
+- [ ] Reproducible ด้วย seed
+- [ ] [4] toggle เปรียบเทียบกับ IAU 88
+
+ขั้นยอดเยี่ยม:
+- [ ] Parallel tempering → anneal converge ดีขึ้น measurable
+- [ ] Human survey (n ≥ 20) ระบุว่า "น่าสนใจกว่ากลุ่มดาวเดิม"
+- [ ] ชื่อกลุ่มดาวที่ rule-based generate ออกมาอ่านเข้าใจได้
+
+## 9. TECH STACK
+
+- Runtime: Node.js 20+
+- ML: graphology + graphology-communities-louvain
+      (หรือ Leiden ผ่าน leidenalg / igraph ถ้าเลือก)
+- Numeric: ไม่ต้องใช้ — spherical math ทำมือได้ (acos, atan2)
+- Viz: Three.js r160+, vanilla JS (ไม่ใช้ framework)
+- Data: JSON, ไม่มี database
+- Deploy: static (Vercel/Netlify/GitHub Pages)
+
+## 10. NON-GOALS (ชัดเจน)
+
+- ไม่ใช่ production star catalog
+- ไม่ได้พยายาม "แทนที่" IAU 88 ในทางวิทยาศาสตร์
+- ไม่ได้อ้างว่ากลุ่มดาวใหม่ "ถูกต้อง" กว่า — เป็น alternative map
+- ไม่ใช้ deep learning แบบ supervised บน 88 ตัวอย่าง
+- ไม่ทำ multi-user / collaborative editing
+- ไม่มี backend
+
+═══════════════════════════════════════════════════════════════════
+END OF SPEC
+═══════════════════════════════════════════════════════════════════
+
+[1] โหลด HYG → filter mag ≤ 3 → ~170 จุด (RA/Dec J2000)
+        ↓
+[2] แปลงเป็น Galactic (l, b) + เวกเตอร์ 3D บน unit sphere
+        ↓
+[3] สร้าง spherical k-NN graph (k = 6) น้ำหนัก = exp(-θ/σ)
+        ↓
+[4] Leiden community detection → partition เริ่มต้น (~25 กลุ่ม)
+        ↓
+[5] Simulated annealing ปรับ partition ด้วย objective:
+       - compactness  (ผลรวมระยะเชิงมุมภายในกลุ่ม)
+       - no crossing  (เส้นเชื่อมต้องไม่ตัดกันบนทรงกลม)
+       - size balance (3–9 ดวงต่อกลุ่ม)
+       - MW-aware    (ถ้าอยู่ใน |b|<15° → เน้น chain ไม่ใช่ blob)
+        ↓
+[6] สร้างเส้นเชื่อมต่อกลุ่ม: MST ภายใน cluster + prune ด้วยมุม
+        ↓
+[7] (optional) GNN rescore ขอบ → เก็บ/ทิ้ง
+        ↓
+[8] ส่งออกเป็น spherical polygons + edge list (JSON)
+        ↓
+[9] Three.js แสดง: เปลือก + MW texture + ดาว + เส้นใหม่

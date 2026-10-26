@@ -1,0 +1,20 @@
+{
+  "name": "zames",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Zames - a machine-devised constellation system on the celestial sphere",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "node ml/build.js --seed 1",
+    "build:seed": "node ml/build.js --seed",
+    "verify": "node ml/verify.js",
+    "bench": "node ml/iau.js",
+    "serve": "node ml/serve.js",
+    "tex": "node ml/make-mw.js"
+  },
+  "dependencies": {
+    "graphology": "^0.26.0",
+    "graphology-communities-louvain": "^2.0.2",
+    "sharp": "^0.35.5"
+  }
+}
