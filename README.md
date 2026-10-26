@@ -163,3 +163,7 @@ npm run serve
 [8] ส่งออกเป็น spherical polygons + edge list (JSON)
         ↓
 [9] Three.js แสดง: เปลือก + MW texture + ดาว + เส้นใหม่
+
+# วิธีรัน
+
+เปิด CMD npm install, npm run build, npm run serve
